@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+
+{
+	"reddit_username": "HelloweenBot",
+	"reddit_password": "stomp45stomp",
+	"reddit_subreddit": "helloween4545",
+	"reddit_ua": "HelloweenBot by OnAComputer",
+	"youtube_account": "helloween4545",
+	"repost_protection": true
+}
