@@ -1,187 +1,161 @@
-#!/usr/bin/env python
-# Posts YouTube videos from a channel to a subreddit
+//YouTube-to-Reddit bot v2.2 - HTML scraper edition
+//by Dan Barbier - reddit.com/u/brocube
+//for use with reddit.com/u/HelloweenBot
 
-# Imports
-import sys
-import logging
-import json
-import praw
-import gdata.youtube.service
+//node
+//get video post history
+//video_history.txt is a comma-delimited list of youtube video GUID's
+var fs = require("fs");
 
-# YouTube functions
-def getUserUploads(username):
-    """Get YouTube uploads by username."""
-    yt_service = gdata.youtube.service.YouTubeService()
-    uri = "http://gdata.youtube.com/feeds/api/users/%s/uploads" % username
-    return yt_service.GetYouTubeVideoFeed(uri)
+var videoHistory;
 
-def getVideoIdFromEntry(entry):
-    """Get video ID from a YouTube entry."""
-    return entry.id.text.split("/")[-1]
+var receivedChunks = "";
+var videoHistoryReadStream = fs.createReadStream("./video_history.txt", {encoding: "utf8"});
+videoHistoryReadStream
+	.on("error", function (err) {
+		console.log("videoHistoryReadStream failed: " + err);
+	})
+	.on("readable", function () {
+		var chunk;
+		while (null !== (chunk = videoHistoryReadStream.read())) {
+			receivedChunks += chunk;
+		}
+	})
+	.on("end", function () {
+		videoHistory = receivedChunks.split(",");
+		if (!Array.isArray(videoHistory)) {
+			return this.emit("error", new Error("videoHistory isn't an array"));
+		}
+		if (videoHistory.length < 1) {
+			return this.emit("error", new Error("videoHistory is empty"));
+		}
+		console.log("videoHistory loaded with " + videoHistory.length + " items");
+		startHTMLPull();
+});
 
-# Reddit functions
-def getReddit(settings):
-    """Get a reference to Reddit."""
-    r = praw.Reddit(user_agent=settings["reddit_ua"])
-    try:
-        r.login(settings["reddit_username"], settings["reddit_password"])
-    except:
-        logging.exception("Error logging into Reddit.")
-        exitApp()
-    return r
+//rawjs - reddit API wrapper
+//npm install raw.js
+//https://www.reddit.com/r/rawjs/wiki/documentation/methods/submit
+//https://www.reddit.com/dev/api#POST_api_submit
+//shoutout to https://www.reddit.com/r/rawjs/comments/23qmme/simple_bot_to_make_an_automated_submission_to_a/
+//to use - create an app with type "script" - https://ssl.reddit.com/prefs/apps/
+var rawjs = require("raw.js");
 
-def getSubreddit(settings, reddit):
-    """Get the subreddit."""
-    return reddit.get_subreddit(settings["reddit_subreddit"])
+var credentials = { //removed from public code. Make sure to put your own info here if you clone this!
+	"username": "HelloweenBot",
+	"password": "Helloween4545"
+};
 
-def submitContent(subreddit, title, link):
-    """Submit a link to a subreddit."""
-    logging.info("Submitting %s (%s)", (title, link))
-    try:
-        subreddit.submit(title, url=link)
-    except praw.errors.APIException:
-        logging.exception("Error on link submission.")
+var oAuth2 = { //removed from public code. Make sure to put your own info here if you clone this!
+	"id": "",
+	"secret": "",
+	"redir": ""
+};
 
-def getPastVideos(subreddit):
-    """Get all YouTube videos posted in the past hour."""
-    hour = subreddit.get_new_by_date()
-    for video in hour:
-        if ("youtube" in video.url):
-            yield video.url
+var reddit = new rawjs("youtube-to-reddit bot");
+reddit.setupOAuth2(oAuth2.id, oAuth2.secret, oAuth2.redir);
 
-# Main functions
-def takeAndSubmit(settings, subreddit, feed):
-    """Iterate through each YouTube feed entry and submit to Reddit."""
-    pastVideos = []
-    if (settings["repost_protection"]):
-        pastVideos = list(getPastVideos(subreddit))
+function postToReddit (url, title) {
+	var submission = {
+		"url": url,
+		"r": "helloween4545",
+		"title": title
+	};
+	reddit.auth(credentials, function (err, res) {
+		if (err) {
+			console.log("reddit.auth failed: " + err);
+		} else {
+			console.log("reddit.auth succeeded: " + res);
+			reddit.captchaNeeded(function (err, required) {
+				if (err) {
+					console.log("reddit.captchaNeeded failed: " + err);
+				} else {
+					if (required) {
+						console.log("can not submit because captcha is needed");
+					} else {
+						reddit.submit(submission, function (err, id) {
+							console.log("posting to reddit:\n  link: " + url + "\n  title: " + title);
+							if (err) {
+								console.log("reddit.submit failed: " + err);
+							} else {
+								console.log("reddit.submit succeeded!");
+							}
+						});
+					}
+				}
+			});
+		}
+	});
+}
 
-    for entry in feed:
-        title = unicode(entry.title.text, "utf-8")
-        url = entry.media.player.url
-        videoid = getVideoIdFromEntry(entry)
-        logging.debug("Video: %s (%s)", (title, url))
+//htmlparser2 - html parser
+//npm install htmlparser2
+//https://github.com/fb55/htmlparser2
 
-        # Check if someone else already uploaded it
-        for post in pastVideos:
-            if (videoid in post):
-                logging.debug("Video found in past video list.")
-                break
-        else:
-            submitContent(subreddit, title, url)
+//(in conjuntion with) request - simple http request client
+//npm install request
+//https://www.npmjs.com/package/request
+var htmlparser = require("htmlparser2");
+var request = require("request");
 
-def loadSettings():
-    """Load settings from file."""
-    try:
-        settingsFile = open("settings.json", "r")
-    except IOError:
-        logging.exception("Error opening settings.json.")
-        exitApp()
-    
-    settingStr = settingsFile.read()
-    settingsFile.close()
+function startHTMLPull () {
+	setInterval(function () {
+		var htmlItems = [];
 
-    try:
-        settings = json.loads(settingStr)
-    except ValueError:
-        logging.exception("Error parsing settings.json.")
-        exitApp()
-    
-    # Check integrity
-    if (len(settings["reddit_username"]) == 0):
-        logging.critical("Reddit username not set.")
-        exitApp()
+		var parser = new htmlparser.Parser({
+			onerror: function (err) {
+				console.log("htmlParser had error: " + err);
+			},
+			onopentag: function (name, attributes) {
+				if (name === "a" && attributes.class === "yt-uix-sessionlink yt-uix-tile-link  spf-link  yt-ui-ellipsis yt-ui-ellipsis-2") {
+					var videoObject = {
+						"guid": "yt:video:" + attributes.href.slice(9), //for compatibility, spoof the GUID to match youtube's xml by adding "yt:video:"
+						"link": "https://www.youtube.com" + attributes.href,
+						"title": attributes.title
+					};
+					htmlItems.push(videoObject);
+				}
+			},
+			onend: function () {
+				if (htmlItems.length < 1 || htmlItems[0].guid.length < 10) {
+					return this.emit("error", new Error("No HTML found!"));
+				} else {
+					for (var i in htmlItems) {
+						if (videoHistory.indexOf(htmlItems[i].guid) === -1) {
+							//update history
+							videoHistory.push(htmlItems[i].guid);
+							//save video history
+							fs.writeFile("./video_history.txt", videoHistory, function (err) {
+								if (err) {
+									console.log("writeFile for video_history.txt failed: " + err);
+								}
+							});
+							//finally, post to reddit!
+							console.log("posting to reddit:", htmlItems[i].link, "-", htmlItems[i].title);
+							postToReddit(htmlItems[i].link, htmlItems[i].title);
+						}
+					}
+				}
+			}
+		}, {decodeEntities: true});
 
-    if (len(settings["reddit_password"]) == 0):
-        logging.critical("Reddit password not set.")
-        exitApp()
+		var youtubeRequest = request("https://www.youtube.com/user/Helloween4545/videos?sort=dd&view=0&flow=list", function (err, res, body) {
+			if (err) {
+				console.log("request callback failed: " + err);
+			}
+			parser.write(body);
+			parser.end();
+		});
 
-    if (len(settings["reddit_subreddit"]) == 0):
-        logging.critical("Subreddit not set.")
-        exitApp()
+		youtubeRequest.on("error", function (err) {
+			console.log("request failed: " + err);
+		});
+		youtubeRequest.on("response", function (res) {
+			if (res.statusCode != 200) {
+				return youtubeRequest.emit("error", new Error("Bad status code: " + res.statusCode));
+			}
+		});
+	}, 30000);
+}
 
-    if (len(settings["reddit_ua"]) == 0):
-        logging.critical("Reddit bot user agent not set.")
-        exitApp()
-
-    if (len(settings["youtube_account"]) == 0):
-        logging.critical("YouTube account not set.")
-        exitApp()
-
-    settings["repost_protection"] = bool(settings["repost_protection"])
-
-    # Get last upload position
-    try:
-        lastUploadFile = open("lastupload.txt", "r")
-        lastUpload = lastUploadFile.read()
-        lastUploadFile.close()
-
-        settings["youtube_lastupload"] = lastUpload
-    except IOError:
-        logging.info("No last uploaded video found.")
-        settings["youtube_lastupload"] = None
-
-    return settings
-
-def savePosition(position):
-    """Write last position to file."""
-    lastUploadFile = open("lastupload.txt", "w")
-    lastUploadFile.write(position)
-    lastUploadFile.close()
-
-def exitApp():
-    sys.exit(1)
-
-def runBot():
-    """Start a run of the bot."""
-    logging.info("Starting bot.")
-    settings = loadSettings()
-
-    logging.info("Getting YouTube videos.")
-
-    # Download video list
-    uploads = getUserUploads(settings["youtube_account"]).entry
-    newestUpload = uploads[0]
-
-    # Reverse from new to old, to old to new
-    uploads.reverse()
-    
-    # Only get new uploads
-    try:
-        videoIdList = map(getVideoIdFromEntry, uploads)
-        indexOfLastUpload = videoIdList.index(settings["youtube_lastupload"])
-        uploads = uploads[indexOfLastUpload + 1:]
-        if (len(uploads) == 0):
-            logging.info("No new uploads since last run.")
-            exitApp()
-    except ValueError:
-        # Ignore a failure if lastupload value isn't in list
-        pass
-
-    # Get reddit stuff
-    logging.info("Logging into Reddit.")
-    reddit = getReddit(settings)
-    sr = getSubreddit(settings, reddit)
-    
-    # Submit entries
-    logging.info("Submitting to Reddit.")
-    takeAndSubmit(settings, sr, uploads)
-    
-    # Save newest position
-    logging.info("Saving position.")
-    videoid = getVideoIdFromEntry(newestUpload)
-    savePosition(videoid)
-    
-    logging.info("Done!")
-
-if __name__ == "__main__":
-    logging.basicConfig()
-
-    try:
-        runBot()
-    except SystemExit:
-        logging.info("Exit called.")
-    except:
-        logging.exception("Uncaught exception.")
-
-    logging.shutdown()
+console.log("\n...booting the Helloween4545 Youtube-To-Reddit Scraper Bot");
