@@ -1,10 +1,10 @@
-//YouTube-to-Reddit bot v2.2 - HTML scraper edition
-//by Dan Barbier - reddit.com/u/brocube
-//for use with reddit.com/u/HelloweenBot
+#YouTube-to-Reddit bot v2.2 - HTML scraper edition
+#by Dan Barbier - reddit.com/u/brocube
+#for use with reddit.com/u/HelloweenBot
 
-//node
-//get video post history
-//video_history.txt is a comma-delimited list of youtube video GUID's
+#node
+#get video post history
+#video_history.txt is a comma-delimited list of youtube video GUID's
 var fs = require("fs");
 
 var videoHistory;
@@ -33,20 +33,20 @@ videoHistoryReadStream
 		startHTMLPull();
 });
 
-//rawjs - reddit API wrapper
-//npm install raw.js
-//https://www.reddit.com/r/rawjs/wiki/documentation/methods/submit
-//https://www.reddit.com/dev/api#POST_api_submit
-//shoutout to https://www.reddit.com/r/rawjs/comments/23qmme/simple_bot_to_make_an_automated_submission_to_a/
-//to use - create an app with type "script" - https://ssl.reddit.com/prefs/apps/
+#rawjs - reddit API wrapper
+#npm install raw.js
+#https://www.reddit.com/r/rawjs/wiki/documentation/methods/submit
+#https://www.reddit.com/dev/api#POST_api_submit
+#shoutout to https://www.reddit.com/r/rawjs/comments/23qmme/simple_bot_to_make_an_automated_submission_to_a/
+#to use - create an app with type "script" - https://ssl.reddit.com/prefs/apps/
 var rawjs = require("raw.js");
 
-var credentials = { //removed from public code. Make sure to put your own info here if you clone this!
+var credentials = { #removed from public code. Make sure to put your own info here if you clone this!
 	"username": "HelloweenBot",
 	"password": "Helloween4545"
 };
 
-var oAuth2 = { //removed from public code. Make sure to put your own info here if you clone this!
+var oAuth2 = { #removed from public code. Make sure to put your own info here if you clone this!
 	"id": "",
 	"secret": "",
 	"redir": ""
@@ -88,13 +88,13 @@ function postToReddit (url, title) {
 	});
 }
 
-//htmlparser2 - html parser
-//npm install htmlparser2
-//https://github.com/fb55/htmlparser2
+#htmlparser2 - html parser
+#//npm install htmlparser2
+#//https://github.com/fb55/htmlparser2
 
-//(in conjuntion with) request - simple http request client
-//npm install request
-//https://www.npmjs.com/package/request
+#//(in conjuntion with) request - simple http request client
+#//npm install request
+#//https://www.npmjs.com/package/request
 var htmlparser = require("htmlparser2");
 var request = require("request");
 
@@ -109,7 +109,7 @@ function startHTMLPull () {
 			onopentag: function (name, attributes) {
 				if (name === "a" && attributes.class === "yt-uix-sessionlink yt-uix-tile-link  spf-link  yt-ui-ellipsis yt-ui-ellipsis-2") {
 					var videoObject = {
-						"guid": "yt:video:" + attributes.href.slice(9), //for compatibility, spoof the GUID to match youtube's xml by adding "yt:video:"
+						"guid": "yt:video:" + attributes.href.slice(9), #for compatibility, spoof the GUID to match youtube's xml by adding "yt:video:"
 						"link": "https://www.youtube.com" + attributes.href,
 						"title": attributes.title
 					};
@@ -122,15 +122,15 @@ function startHTMLPull () {
 				} else {
 					for (var i in htmlItems) {
 						if (videoHistory.indexOf(htmlItems[i].guid) === -1) {
-							//update history
+							#update history
 							videoHistory.push(htmlItems[i].guid);
-							//save video history
+							#save video history
 							fs.writeFile("./video_history.txt", videoHistory, function (err) {
 								if (err) {
 									console.log("writeFile for video_history.txt failed: " + err);
 								}
 							});
-							//finally, post to reddit!
+							#finally, post to reddit!
 							console.log("posting to reddit:", htmlItems[i].link, "-", htmlItems[i].title);
 							postToReddit(htmlItems[i].link, htmlItems[i].title);
 						}
